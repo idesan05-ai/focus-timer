@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#11131c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Focus Timer ― ポモドーロ & ストップウォッチ</title>
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://unpkg.com/lucide@latest"></script>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=M+PLUS+Rounded+1c:wght@400;500;700;800&display=swap" rel="stylesheet">
+
+<!-- PWA 設定 -->
+<link rel="manifest" href="manifest.json">
+<script>
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js')
+      .then(() => console.log('Service Worker Registered'))
+      .catch((err) => console.error('Service Worker Failed', err));
+  }
+</script>
+
+<style>
+    :root {
+        --color-bg: #11131c;
+        --color-surface: #171a26;
+        --color-surface-2: #1f2333;
+        --color-surface-3: #2a2f45;
+        --color-border: rgba(255,255,255,0.08);
+        --color-text: #f5f6fa;
+        --color-text-dim: #8b93a8;
+        --color-text-dimmer: #565f74;
+        --color-danger: #ef4444;
+        --active-color: #74b9ff;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+        margin: 0;
+        background-color: var(--color-bg);
+        color: var(--color-text);
+        font-family: 'M PLUS Rounded 1c', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        -webkit-tap-highlight-color: transparent;
+        overscroll-behavior-y: none;
+    }
+
+    .font-numeric {
+        font-family: 'Space Grotesk', 'M PLUS Rounded 1c', sans-serif;
+        font-variant-numeric: tabular-nums;
+    }
+
+    button { font-family: inherit; }
+
+    /* ============ レイアウト ============ */
+    .app-shell {
+        min-height: 100vh;
+        min-height: 100dvh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: max(28px, env(safe-area-inset-top)) 20px max(24px, env(safe-area-inset-bottom));
+        box-sizing: border-box;
+        gap: 22px;
+    }
+
+    /* ============ タグチップボタン ============ */
+    .tag-chip-btn {
+        background-color: var(--color-surface);
+        border: 1px solid var(--color-border);
+        color: var(--color-text-dim);
+        padding: 8px 18px 8px 14px;
+        border-radius: 999px;
+        font-size: 12.5px;
+        font-weight: 700;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        transition: transform 0.15s ease, background-color 0.15s ease;
+    }
+    .tag-chip-btn:active { transform: scale(0.96); background-color: var(--color-surface-2); }
+    .tag-color-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+
+    /* ============ タブ ============ */
+    .mode-tabs {
+        display: flex;
+        background-color: var(--color-surface);
+        border-radius: 999px;
+        padding: 4px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.35);
+    }
+    .tab-btn {
+        background: transparent;
+        border: none;
+        color: var(--color-text-dimmer);
+        padding: 10px 20px;
+        border-radius: 999px;
+        font-size: 13.5px;
+        font-weight: 700;
+        cursor: pointer;
+        transition: all 0.25s ease;
+        white-space: nowrap;
+    }
+    .tab-btn.active {
+        background-color: var(--color-surface-3);
+        color: #fff;
+        box-shadow: inset 0 0 0 1px rgba(255,255,255,0.12);
+    }
+
+    /* ============ 円形タイマー ============ */
+    .timer-ring {
+        width: min(266px, 62vw, 40vh);
+        height: min(266px, 62vw, 40vh);
+        border-radius: 50%;
+        background: conic-gradient(var(--active-color) 0%, var(--color-surface-2) 0%);
+        padding: 7px;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.55), 0 0 46px -14px var(--active-color);
+        transition: background 0.1s linear, box-shadow 0.4s ease;
+        flex-shrink: 0;
+    }
+    .timer-ring-inner {
+        width: 100%;
+        height: 100%;
+        background-color: var(--color-bg);
+        border-radius: 50%;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        position: relative;
+        text-align: center;
+        padding: 0 12px;
+    }
+    .ring-content { display: none; flex-direction: column; align-items: center; }
+    .ring-content.active { display: flex; }
+    .time-display {
+        font-size: 2.85rem;
+        font-weight: 600;
+        letter-spacing: 1px;
+        line-height: 1.1;
+        margin-bottom: 10px;
+    }
+    .status-text { font-size: 12px; color: var(--color-text-dim); font-weight: 500; }
+
+    /* ============ 丸ボタン共通 ============ */
+    .control-row { display: flex; gap: 22px; align-items: center; min-height: 58px; }
+    .round-btn {
+        border: none;
+        border-radius: 50%;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        cursor: pointer;
+        transition: transform 0.1s ease, background-color 0.2s ease;
+    }
+    .round-btn:active { transform: scale(0.93); }
+    .round-btn.lg { width: 58px; height: 58px; }
+    .round-btn.md { width: 50px; height: 50px; }
+    .round-btn.primary { background-color: #fff; color: var(--color-bg); }
+    .round-btn.primary svg { position: relative; left: 1px; }
+    .round-btn.ghost { background-color: var(--color-surface-2); color: #fff; border: 1px solid var(--color-border); }
+
+    /* ============ アクション行(設定・記録) ============ */
+    .action-row {
+        display: flex;
+        justify-content: center;
+        gap: 28px;
+        width: 100%;
+        max-width: 280px;
+        margin-top: auto;
+    }
+    .action-item { display: flex; flex-direction: column; align-items: center; gap: 6px; flex: 1; }
+    .action-btn {
+        position: relative;
+        width: 54px;
+        height: 54px;
+        border-radius: 50%;
+        background-color: var(--color-surface);
+        border: 1px solid var(--color-border);
+        color: #fff;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        cursor: pointer;
+        box-shadow: 0 4px 14px rgba(0,0,0,0.4);
+        transition: all 0.2s ease;
+    }
+    .action-btn:active { transform: scale(0.92); background-color: var(--color-surface-2); }
+    .action-btn.disabled { opacity: 0.35; pointer-events: none; }
+    .action-label { font-size: 10.5px; color: var(--color-text-dimmer); font-weight: 700; }
+
+    /* ============ ドロワー(下から出るパネル) 共通 ============ */
+    .overlay {
+        position: fixed; inset: 0;
+        background: rgba(0,0,0,0.75);
+        backdrop-filter: blur(6px);
+        -webkit-backdrop-filter: blur(6px);
+        opacity: 0; pointer-events: none;
+        transition: opacity 0.3s ease;
+        z-index: 10;
+    }
+    .overlay.active { opacity: 1; pointer-events: auto; }
+
+    .bottom-drawer {
+        position: fixed;
+        bottom: -100%;
+        left: 0; width: 100%;
+        max-height: 84vh;
+        background-color: #14161f;
+        border-top: 1px solid var(--color-border);
+        border-top-left-radius: 26px;
+        border-top-right-radius: 26px;
+        transition: bottom 0.32s cubic-bezier(0.25,0.8,0.25,1);
+        padding: 18px 20px max(24px, env(safe-area-inset-bottom));
+        box-sizing: border-box;
+        z-index: 20;
+        overflow-y: auto;
+        box-shadow: 0 -12px 30px rgba(0,0,0,0.5);
+    }
+    .bottom-drawer.open { bottom: 0; }
+
+    .drawer-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
+    .drawer-title { font-size: 17px; font-weight: 800; letter-spacing: 0.3px; }
+    .icon-btn-close {
+        background: rgba(255,255,255,0.06);
+        border: 1px solid var(--color-border);
+        color: #fff;
+        width: 34px; height: 34px;
+        border-radius: 50%;
+        display: flex; justify-content: center; align-items: center;
+        cursor: pointer;
+    }
+
+    /* ============ 設定ドロワー(ステッパー) ============ */
+    .settings-stack { display: flex; flex-direction: column; gap: 20px; padding-bottom: 4px; }
+    .setting-block { display: flex; justify-content: space-between; align-items: center; }
+    .setting-label { font-size: 14px; font-weight: 700; color: var(--color-text); }
+    .setting-hint { font-size: 11px; color: var(--color-text-dimmer); margin-top: 2px; }
+    .stepper { display: flex; align-items: center; gap: 10px; }
+    .stepper-btn {
+        background: var(--color-surface-2);
+        border: 1px solid var(--color-border);
+        color: #fff;
+        width: 34px; height: 34px;
+        border-radius: 50%;
+        display: flex; justify-content: center; align-items: center;
+        cursor: pointer;
+    }
+    .stepper-btn:active { background: var(--color-surface-3); transform: scale(0.93); }
+    .stepper-btn svg { width: 15px; height: 15px; }
+    .stepper-input {
+        background-color: transparent;
+        border: none;
+        color: #fff;
+        font-size: 20px;
+        font-weight: 700;
+        text-align: center;
+        width: 56px;
+        outline: none;
+        caret-color: transparent;
+    }
+
+    /* ============ カレンダー/グラフ ============ */
+    .view-toggle { display: flex; background: rgba(255,255,255,0.05); border-radius: 12px; padding: 4px; margin-bottom: 16px; }
+    .view-toggle-btn { flex: 1; padding: 7px 0; text-align: center; font-size: 12.5px; font-weight: 700; color: var(--color-text-dim); border-radius: 9px; cursor: pointer; transition: all 0.2s ease; }
+    .view-toggle-btn.active { background: #fff; color: var(--color-bg); }
+
+    .month-nav-btn { color: var(--color-text-dim); background: transparent; border: none; padding: 8px; cursor: pointer; display: flex; }
+    .month-nav-btn svg { width: 18px; height: 18px; }
+
+    .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; text-align: center; }
+    .calendar-day-header { font-size: 10.5px; font-weight: 700; color: var(--color-text-dimmer); padding: 4px 0; }
+    .calendar-cell {
+        aspect-ratio: 1; display: flex; flex-direction: column; justify-content: center; align-items: center;
+        font-size: 12.5px; font-weight: 600; border-radius: 50%; cursor: pointer; position: relative;
+        transition: all 0.2s ease; background-color: rgba(255,255,255,0.015); color: var(--color-text-dim);
+    }
+    .calendar-cell.inactive { opacity: 0; pointer-events: none; }
+    .calendar-cell.has-log { border: 1.5px solid rgba(255,255,255,0.3); color: #fff; font-weight: 700; }
+    .calendar-cell.has-log::after {
+        content: ''; position: absolute; bottom: 3px; width: 4px; height: 4px; border-radius: 50%;
+        background-color: var(--dominant-color, #74b9ff); box-shadow: 0 0 4px var(--dominant-color, #74b9ff);
+    }
+    .calendar-cell.selected { background-color: #fff !important; color: var(--color-bg) !important; border-color: #fff !important; }
+    .calendar-cell.selected::after { background-color: var(--color-bg); box-shadow: none; }
+
+    .day-detail-card { margin-top: 16px; padding: 16px; border-radius: 18px; background: var(--color-surface); border: 1px solid var(--color-border); text-align: center; }
+    .day-detail-label { font-size: 11.5px; color: var(--color-text-dimmer); margin-bottom: 4px; font-weight: 600; }
+    .day-detail-value { font-size: 19px; font-weight: 800; color: #fff; margin-bottom: 10px; }
+    .tag-badge { font-size: 10.5px; font-weight: 700; padding: 5px 10px; border-radius: 999px; display: inline-flex; align-items: center; gap: 5px; }
+    .tag-badge-dot { width: 6px; height: 6px; border-radius: 50%; }
+
+    /* ============ モーダル(中央表示) ============ */
+    .modal {
+        position: fixed; top: 50%; left: 50%;
+        transform: translate(-50%, -50%) scale(0.92);
+        background-color: #161927;
+        border: 1px solid var(--color-border);
+        border-radius: 22px;
+        padding: 22px;
+        z-index: 100;
+        width: 88%;
+        max-width: 360px;
+        max-height: 80vh;
+        overflow-y: auto;
+        box-shadow: 0 20px 45px rgba(0,0,0,0.8);
+        opacity: 0; pointer-events: none;
+        transition: all 0.2s ease-out;
+    }
+    .modal.active { transform: translate(-50%, -50%) scale(1); opacity: 1; pointer-events: auto; }
+    .modal-title { font-size: 16px; font-weight: 800; margin-bottom: 16px; }
+    .modal-input {
+        width: 100%; background-color: var(--color-surface-2);
+        border: 1px solid var(--color-border); border-radius: 11px;
+        padding: 11px 13px; color: #fff; font-size: 13.5px; margin-bottom: 12px; outline: none;
+    }
+    .modal-btns { display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px; }
+    .modal-btn { padding: 9px 18px; border-radius: 10px; font-size: 13px; font-weight: 700; cursor: pointer; border: none; }
+    .modal-btn.cancel { background-color: transparent; color: var(--color-text-dim); }
+    .modal-btn.confirm { background-color: #fff; color: var(--color-bg); }
+    .modal-btn.confirm.danger { background-color: var(--color-danger); color: #fff; }
+
+    .tag-list { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; max-height: 168px; overflow-y: auto; }
+    .tag-item {
+        padding: 7px 12px 7px 10px; border-radius: 999px; font-size: 12.5px; font-weight: 700;
+        cursor: pointer; border: 1px solid transparent; display: flex; align-items: center; gap: 7px;
+        background: rgba(255,255,255,0.04); color: var(--color-text-dim);
+    }
+    .tag-item.selected { border-color: currentColor; color: #fff; }
+    .tag-item-delete { display: flex; opacity: 0.6; margin-left: 2px; }
+    .tag-item-delete svg { width: 12px; height: 12px; }
+
+    .color-swatch-row { display: flex; flex-wrap: wrap; gap: 9px; margin-bottom: 14px; }
+    .color-swatch {
+        width: 28px; height: 28px; border-radius: 50%; cursor: pointer;
+        border: 2px solid transparent; display: flex; align-items: center; justify-content: center;
+        transition: transform 0.15s ease;
+    }
+    .color-swatch.selected { border-color: #fff; transform: scale(1.1); }
+    .color-swatch svg { width: 13px; height: 13px; color: #11131c; display: none; }
+    .color-swatch.selected svg { display: block; }
+
+    /* トースト */
+    .toast {
+        position: fixed; top: max(18px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
+        background-color: #232842; color: #fff; padding: 11px 20px; border-radius: 999px;
+        font-size: 12.5px; font-weight: 700; box-shadow: 0 8px 20px rgba(0,0,0,0.5);
+        opacity: 0; transition: opacity 0.3s ease, top 0.3s ease; z-index: 50; pointer-events: none;
+        border: 1px solid var(--color-border);
+    }
+    .toast.show { opacity: 1; top: max(30px, env(safe-area-inset-top)); }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+
+    <button class="tag-chip-btn" id="tagChipBtn">
+        <div class="tag-color-dot" id="activeTagDot"></div>
+        <span id="activeTagText">#学習</span>
+    </button>
+
+    <div class="mode-tabs">
+        <button class="tab-btn active" id="tab-pomo">ポモドーロタイマー</button>
+        <button class="tab-btn" id="tab-sw">ストップウォッチ</button>
+    </div>
+
+    <div class="timer-ring" id="timerRing">
+        <div class="timer-ring-inner">
+            <div class="ring-content active" id="content-pomodoro">
+                <div class="time-display font-numeric" id="pomo-time-text">25:00</div>
+                <div class="status-text" id="pomo-status-text">作業 25分・休憩5分 × 2セット</div>
+            </div>
+            <div class="ring-content" id="content-stopwatch">
+                <div class="time-display font-numeric" id="sw-time-text">00:00:00</div>
+                <div class="status-text" id="sw-status-text">タップして計測開始</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="control-row" id="pomoIdleControls">
+        <button class="round-btn primary lg" id="pomoStartBtn" title="開始">
+            <i data-lucide="play"></i>
+        </button>
+    </div>
+    <div class="control-row" id="pomoRunControls" style="display:none;">
+        <button class="round-btn ghost lg" id="pomoStopBtn" title="停止">
+            <i data-lucide="square"></i>
+        </button>
+        <button class="round-btn ghost md" id="pomoSkipBtn" title="次のセクションへ">
+            <i data-lucide="skip-forward"></i>
+        </button>
+    </div>
+    <div class="control-row" id="swControlsGroup" style="display:none;">
+        <button class="round-btn ghost md" id="swResetBtn" title="リセット">
+            <i data-lucide="rotate-ccw"></i>
+        </button>
+        <button class="round-btn primary lg" id="swPlayBtn" title="再生/一時停止">
+            <i data-lucide="play" class="icon-play"></i>
+            <i data-lucide="pause" class="icon-pause" style="display:none;"></i>
+        </button>
+    </div>
+
+    <div class="action-row">
+        <div class="action-item">
+            <button class="action-btn" id="openSettingsBtn"><i data-lucide="settings-2"></i></button>
+            <span class="action-label">設定</span>
+        </div>
+        <div class="action-item">
+            <button class="action-btn" id="openStatsBtn"><i data-lucide="calendar-days"></i></button>
+            <span class="action-label">記録</span>
+        </div>
+    </div>
+
+</div>
+
+<div class="overlay" id="overlay"></div>
+
+<!-- 設定ドロワー(ポモドーロ) -->
+<div class="bottom-drawer" id="settingsDrawer">
+    <div class="drawer-header">
+        <div class="drawer-title">ポモドーロ設定</div>
+        <button class="icon-btn-close" data-close><i data-lucide="x"></i></button>
+    </div>
+    <div class="settings-stack">
+        <div class="setting-block">
+            <div>
+                <div class="setting-label">ループ回数</div>
+                <div class="setting-hint">作業→休憩を何セット繰り返すか</div>
+            </div>
+            <div class="stepper">
+                <button class="stepper-btn" data-step-target="set-loops" data-step-delta="-1"><i data-lucide="minus"></i></button>
+                <input type="text" readonly inputmode="none" id="set-loops" class="stepper-input font-numeric" value="2">
+                <button class="stepper-btn" data-step-target="set-loops" data-step-delta="1"><i data-lucide="plus"></i></button>
+            </div>
+        </div>
+        <div class="setting-block">
+            <div class="setting-label">作業時間（分）</div>
+            <div class="stepper">
+                <button class="stepper-btn" data-step-target="set-work" data-step-delta="-1"><i data-lucide="minus"></i></button>
+                <input type="text" readonly inputmode="none" id="set-work" class="stepper-input font-numeric" value="25">
+                <button class="stepper-btn" data-step-target="set-work" data-step-delta="1"><i data-lucide="plus"></i></button>
+            </div>
+        </div>
+        <div class="setting-block">
+            <div class="setting-label">休憩時間（分）</div>
+            <div class="stepper">
+                <button class="stepper-btn" data-step-target="set-break" data-step-delta="-1"><i data-lucide="minus"></i></button>
+                <input type="text" readonly inputmode="none" id="set-break" class="stepper-input font-numeric" value="5">
+                <button class="stepper-btn" data-step-target="set-break" data-step-delta="1"><i data-lucide="plus"></i></button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 統計ドロワー -->
+<div class="bottom-drawer" id="statsDrawer">
+    <div class="drawer-header">
+        <div class="drawer-title">作業記録</div>
+        <button class="icon-btn-close" data-close><i data-lucide="x"></i></button>
+    </div>
+
+    <div class="view-toggle">
+        <div class="view-toggle-btn active" id="toggle-cal">カレンダー</div>
+        <div class="view-toggle-btn" id="toggle-chart">グラフ</div>
+    </div>
+
+    <div class="flex justify-between items-center mb-3 px-1">
+        <button class="month-nav-btn" id="prevMonthBtn"><i data-lucide="chevron-left"></i></button>
+        <div class="text-sm font-bold" id="calendar-month-year">2026年 7月</div>
+        <button class="month-nav-btn" id="nextMonthBtn"><i data-lucide="chevron-right"></i></button>
+    </div>
+
+    <div id="cal-view-container">
+        <div class="calendar-grid mb-2">
+            <div class="calendar-day-header" style="color:#ff8a8a;">日</div>
+            <div class="calendar-day-header">月</div>
+            <div class="calendar-day-header">火</div>
+            <div class="calendar-day-header">水</div>
+            <div class="calendar-day-header">木</div>
+            <div class="calendar-day-header">金</div>
+            <div class="calendar-day-header" style="color:#74b9ff;">土</div>
+        </div>
+        <div class="calendar-grid" id="calendarDaysGrid"></div>
+
+        <div class="day-detail-card">
+            <div class="day-detail-label" id="calSelectedDayText">選択した日</div>
+            <div class="day-detail-value" id="calSelectedTimeText">0分</div>
+            <div class="flex flex-wrap justify-center gap-2" id="calSelectedTagBreakdown"></div>
+        </div>
+    </div>
+
+    <div id="chart-view-container" style="display:none;">
+        <div class="relative w-full mt-2" style="height:230px;">
+            <canvas id="workChart"></canvas>
+        </div>
+        <div class="mt-4 text-center" style="font-size:11.5px; color:var(--color-text-dimmer);">※当月のタグ別・積み上げ作業時間</div>
+    </div>
+</div>
+
+<!-- タグ選択・作成モーダル -->
+<div class="modal" id="tagSelectModal">
+    <div class="modal-title">タグの選択・作成</div>
+    <div class="tag-list" id="tagListContainer"></div>
+    <div class="color-swatch-row" id="colorSwatchRow"></div>
+    <input type="text" id="new-tag-name" class="modal-input" placeholder="新しいタグ名（例: 読書）">
+    <div class="modal-btns">
+        <button class="modal-btn cancel" id="closeTagModalBtn">閉じる</button>
+        <button class="modal-btn confirm" id="createTagBtn">追加する</button>
+    </div>
+</div>
+
+<!-- 削除確認モーダル(共通) -->
+<div class="modal" id="confirmDeleteModal">
+    <div class="modal-title" id="confirm-delete-title">削除の確認</div>
+    <div style="font-size:13px; color:var(--color-text-dim); margin-bottom:20px; line-height:1.6;" id="confirm-delete-body">本当にこれを削除しますか？</div>
+    <div class="modal-btns">
+        <button class="modal-btn cancel" id="cancelDeleteBtn">キャンセル</button>
+        <button class="modal-btn confirm danger" id="confirmDeleteBtn">削除する</button>
+    </div>
+</div>
+
+<div class="toast" id="toastEl"></div>
+
+<script src="script.js"></script>
+</body>
+</html>
