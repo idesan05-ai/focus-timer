@@ -428,11 +428,16 @@
     /* ============================================================
         6. モード切替とタブUIの制御
     ============================================================ */
-    // タイマー稼働状態に応じてタブの見た目を切り替える
     function updateTabState() {
         const isRunning = pomoState.running || swState.isRunning;
-        document.getElementById("tab-pomo").classList.toggle("disabled", isRunning);
-        document.getElementById("tab-sw").classList.toggle("disabled", isRunning);
+        const tabPomo = document.getElementById("tab-pomo");
+        const tabSw = document.getElementById("tab-sw");
+        
+        tabPomo.classList.toggle("disabled", isRunning);
+        tabPomo.disabled = isRunning; 
+        
+        tabSw.classList.toggle("disabled", isRunning);
+        tabSw.disabled = isRunning; 
     }
 
     function updateSettingsBtnState() {
@@ -442,9 +447,7 @@
     function switchMode(mode) {
         if (mode === currentMode) return;
 
-        // 稼働中の場合はモード切替をブロックし、トーストで通知する
         if (pomoState.running || swState.isRunning) {
-            showToast("計測中はモードを切り替えられません");
             return;
         }
 
@@ -510,7 +513,7 @@
         document.getElementById("pomoRunControls").style.display = "flex";
         
         updateSettingsBtnState();
-        updateTabState(); // タブ無効化
+        updateTabState(); 
 
         updatePomoStatusText();
         clearInterval(timerId);
@@ -608,7 +611,7 @@
         document.getElementById("pomoIdleControls").style.display = "flex";
         
         updateSettingsBtnState();
-        updateTabState(); // タブ有効化
+        updateTabState(); 
         
         clearSWNotification('timer-persistent');
     }
@@ -646,7 +649,7 @@
         }
         
         updateSwRingStyle();
-        updateTabState(); // タブの有効/無効切り替え
+        updateTabState(); 
     }
 
     function tickStopwatch() {
@@ -687,7 +690,7 @@
         setIconState(document.getElementById("swPlayBtn"), false);
         
         updateSwRingStyle();
-        updateTabState(); // タブ有効化
+        updateTabState(); 
         
         clearSWNotification('timer-persistent');
     }
@@ -921,7 +924,7 @@
         fn_updateActiveTagDisplay();
         updateIdlePomoDisplay();
         updateSettingsBtnState();
-        updateTabState(); // 初期ロード時にも念のため反映
+        updateTabState(); 
         renderCalendar(currentCalYear, currentCalMonth);
         updateSelectedDayDetail(selectedCalDateString);
         refreshIcons();

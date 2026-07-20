@@ -1,4 +1,4 @@
-const CACHE_NAME = 'focus-timer-v2.2';
+const CACHE_NAME = 'focus-timer-v2.3';
 const ASSETS = [
   'index.html',
   'script.js',

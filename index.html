@@ -116,6 +116,7 @@
     }
     .tab-btn.disabled {
         opacity: 0.35;
+        pointer-events: none;
     }
 
     /* ============ 円形タイマー ============ */
@@ -301,7 +302,7 @@
     .tag-badge { 
         font-size: 10.5px; font-weight: 700; padding: 5px 10px; border-radius: 999px; 
         display: inline-flex; align-items: center; gap: 5px; 
-        cursor: pointer; transition: opacity 0.2s ease; /* タップ可能に */
+        cursor: pointer; transition: opacity 0.2s ease;
     }
     .tag-badge:active { opacity: 0.6; }
     .tag-badge-dot { width: 6px; height: 6px; border-radius: 50%; }
