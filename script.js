@@ -50,7 +50,6 @@
     const timerRing = document.getElementById("timerRing");
 
     const pomoState = { running: false, currentLoop: 1, isBreak: false, duration: 0, startTime: 0, lastElapsedSeconds: 0 };
-    // 通知リマインド用の管理変数(lastReminderMinutes)を追加
     const swState = { isRunning: false, startTime: 0, elapsedTime: 0, lastElapsedSeconds: 0, lastReminderMinutes: 0 };
 
     let pomoSettings = loadJSON("f_pomo_settings", { loops: 2, workMin: 25, breakMin: 5 });
@@ -125,7 +124,7 @@
     }
 
     /* ============================================================
-        2.5 通知制御ヘルパー
+        2.5 通知制御ヘルパー（Service Worker Ready 連携版）
     ============================================================ */
     function requestNotificationPermission() {
         if ("Notification" in window && Notification.permission === "default") {
@@ -135,9 +134,15 @@
 
     function showSWNotification(title, body, tag, silent = false) {
         if ("Notification" in window && Notification.permission === "granted") {
-            if (navigator.serviceWorker && navigator.serviceWorker.controller) {
-                navigator.serviceWorker.controller.postMessage({
-                    type: 'SHOW_NOTIFICATION', title, body, tag, silent
+            if ("serviceWorker" in navigator) {
+                navigator.serviceWorker.ready.then((registration) => {
+                    registration.showNotification(title, {
+                        body: body,
+                        icon: 'https://placehold.co/192x192/171a26/74b9ff?text=FT',
+                        tag: tag,
+                        renotify: true,
+                        silent: silent
+                    });
                 });
             }
         }
@@ -145,8 +150,12 @@
 
     function clearSWNotification(tag) {
         if ("Notification" in window && Notification.permission === "granted") {
-            if (navigator.serviceWorker && navigator.serviceWorker.controller) {
-                navigator.serviceWorker.controller.postMessage({ type: 'CLEAR_NOTIFICATION', tag });
+            if ("serviceWorker" in navigator) {
+                navigator.serviceWorker.ready.then((registration) => {
+                    registration.getNotifications({ tag: tag }).then((notifications) => {
+                        notifications.forEach((notification) => notification.close());
+                    });
+                });
             }
         }
     }
@@ -358,7 +367,7 @@
     }
 
     function startPomodoro() {
-        requestNotificationPermission(); // 初回起動時に通知許可を要求
+        requestNotificationPermission();
 
         pomoState.running = true;
         pomoState.currentLoop = 1;
@@ -464,7 +473,7 @@
         document.getElementById("pomoRunControls").style.display = "none";
         document.getElementById("pomoIdleControls").style.display = "flex";
         updateSettingsBtnState();
-        clearSWNotification('timer-persistent'); // 計測停止時に通知を消去
+        clearSWNotification('timer-persistent');
     }
 
     /* ============================================================
@@ -480,7 +489,7 @@
     function toggleStopwatch() {
         const btn = document.getElementById("swPlayBtn");
         if (!swState.isRunning) {
-            requestNotificationPermission(); // 通知許可を要求
+            requestNotificationPermission();
             
             swState.isRunning = true;
             swState.startTime = Date.now() - swState.elapsedTime;
@@ -490,7 +499,6 @@
             setIconState(btn, true);
             document.getElementById("sw-status-text").textContent = "計測中...";
 
-            // 固定通知を発行
             const tagName = getTag(currentTagId) ? getTag(currentTagId).name : "作業";
             showSWNotification(`?? 計測中: #${tagName}`, '現在ストップウォッチが稼働しています（タップで開く）', 'timer-persistent', true);
         } else {
@@ -499,7 +507,6 @@
             setIconState(btn, false);
             document.getElementById("sw-status-text").textContent = "一時停止中";
             
-            // 一時停止した場合は通知を消去する
             clearSWNotification('timer-persistent');
         }
         updateSwRingStyle();
@@ -515,10 +522,9 @@
             swState.lastElapsedSeconds = elapsed;
         }
 
-        // 30分経過するごとのリマインド通知
         const totalMinutes = Math.floor(elapsed / 60);
         if (totalMinutes > 0 && totalMinutes % 30 === 0 && swState.lastReminderMinutes !== totalMinutes) {
-            swState.lastReminderMinutes = totalMinutes; // 連続発火を防止
+            swState.lastReminderMinutes = totalMinutes;
             showSWNotification('? 計測リマインド', `ストップウォッチ開始から ${totalMinutes} 分経過しました。継続中ですか？`, 'timer-reminder', false);
         }
 
@@ -535,14 +541,14 @@
         swState.isRunning = false;
         swState.elapsedTime = 0;
         swState.lastElapsedSeconds = 0;
-        swState.lastReminderMinutes = 0; // リマインド状態もリセット
+        swState.lastReminderMinutes = 0;
         
         document.getElementById("sw-time-text").textContent = "00:00:00";
         document.getElementById("sw-status-text").textContent = "タップして計測開始";
         setIconState(document.getElementById("swPlayBtn"), false);
         updateSwRingStyle();
         
-        clearSWNotification('timer-persistent'); // リセット時に通知を消去
+        clearSWNotification('timer-persistent');
     }
 
     /* ============================================================
