@@ -295,7 +295,12 @@
     .day-detail-card { margin-top: 16px; padding: 16px; border-radius: 18px; background: var(--color-surface); border: 1px solid var(--color-border); text-align: center; }
     .day-detail-label { font-size: 11.5px; color: var(--color-text-dimmer); margin-bottom: 4px; font-weight: 600; }
     .day-detail-value { font-size: 19px; font-weight: 800; color: #fff; margin-bottom: 10px; }
-    .tag-badge { font-size: 10.5px; font-weight: 700; padding: 5px 10px; border-radius: 999px; display: inline-flex; align-items: center; gap: 5px; }
+    .tag-badge { 
+        font-size: 10.5px; font-weight: 700; padding: 5px 10px; border-radius: 999px; 
+        display: inline-flex; align-items: center; gap: 5px; 
+        cursor: pointer; transition: opacity 0.2s ease; /* タップ可能に */
+    }
+    .tag-badge:active { opacity: 0.6; }
     .tag-badge-dot { width: 6px; height: 6px; border-radius: 50%; }
 
     /* ============ モーダル(中央表示) ============ */
@@ -495,6 +500,7 @@
             <div class="day-detail-label" id="calSelectedDayText">選択した日</div>
             <div class="day-detail-value" id="calSelectedTimeText">0分</div>
             <div class="flex flex-wrap justify-center gap-2" id="calSelectedTagBreakdown"></div>
+            <div class="mt-3 text-center" style="font-size:10.5px; color:var(--color-text-dimmer);">※タグをタップして時間を修正できます</div>
         </div>
     </div>
 
@@ -518,13 +524,40 @@
     </div>
 </div>
 
-<!-- 削除確認モーダル(共通) -->
-<div class="modal" id="confirmDeleteModal">
-    <div class="modal-title" id="confirm-delete-title">削除の確認</div>
-    <div style="font-size:13px; color:var(--color-text-dim); margin-bottom:20px; line-height:1.6;" id="confirm-delete-body">本当にこれを削除しますか？</div>
+<!-- ログ時間手動修正用モーダル -->
+<div class="modal" id="editLogModal">
+    <div class="modal-title">作業時間の修正</div>
+    <div style="font-size:13px; color:var(--color-text-dim); margin-bottom:12px;" id="editLogTargetText"></div>
+    <div class="flex items-center gap-2 mb-4">
+        <input type="number" id="editLogMinutes" class="modal-input font-numeric" style="margin-bottom:0; text-align:right; font-size:18px;" min="0">
+        <span class="text-sm font-bold">分</span>
+    </div>
     <div class="modal-btns">
-        <button class="modal-btn cancel" id="cancelDeleteBtn">キャンセル</button>
-        <button class="modal-btn confirm danger" id="confirmDeleteBtn">削除する</button>
+        <button class="modal-btn cancel" data-close>キャンセル</button>
+        <button class="modal-btn confirm" id="saveEditLogBtn">修正を適用</button>
+    </div>
+</div>
+
+<!-- 長時間放置検知モーダル (プランA用) -->
+<div class="modal" id="abandonmentModal">
+    <div class="modal-title text-orange-400">長時間の放置を検知</div>
+    <div style="font-size:13px; color:var(--color-text-dim); margin-bottom:20px; line-height:1.6;">
+        2時間以上バックグラウンドでタイマーが稼働していました。<br>
+        放置前までの状態に戻すか、上限（2時間分）として記録するか選択してください。
+    </div>
+    <div class="modal-btns" style="flex-direction: column; gap:12px;">
+        <button class="modal-btn confirm" style="width:100%;" id="abandonSaveBtn">上限(2時間)として記録・停止</button>
+        <button class="modal-btn cancel" style="width:100%; text-align:center; background:rgba(255,255,255,0.05);" id="abandonDiscardBtn">記録せず、放置前まで戻す</button>
+    </div>
+</div>
+
+<!-- 汎用確認モーダル (削除・修正などのYes/No用) -->
+<div class="modal" id="confirmModal">
+    <div class="modal-title" id="confirm-title">確認</div>
+    <div style="font-size:13px; color:var(--color-text-dim); margin-bottom:20px; line-height:1.6;" id="confirm-body">本当に実行しますか？</div>
+    <div class="modal-btns">
+        <button class="modal-btn cancel" data-close>キャンセル</button>
+        <button class="modal-btn confirm" id="confirmActionBtn">実行</button>
     </div>
 </div>
 

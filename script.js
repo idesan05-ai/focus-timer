@@ -84,6 +84,10 @@
     let currentCalMonth = now.getMonth();
     let selectedCalDateString = getTodayDateString();
     let chartInstance = null;
+    
+    // ログ手動編集用の状態
+    let editingLogDate = null;
+    let editingLogTagId = null;
 
     const jpDayOfWeek = ["日", "月", "火", "水", "木", "金", "土"];
 
@@ -122,7 +126,7 @@
     }
 
     /* ============================================================
-        2.5 通知制御ヘルパー（非同期許可要求 ＆ 二重バックアップ通知）
+        2.5 通知制御ヘルパー
     ============================================================ */
     async function ensureNotificationPermission() {
         if (!("Notification" in window)) return false;
@@ -140,7 +144,6 @@
 
         if ("serviceWorker" in navigator) {
             const reg = await navigator.serviceWorker.ready;
-            // 方法1: Registrationから直接通知発行（最も確実）
             reg.showNotification(title, {
                 body: body,
                 icon: 'https://placehold.co/192x192/171a26/74b9ff?text=FT',
@@ -148,7 +151,6 @@
                 renotify: true,
                 requireInteraction: true
             }).catch(() => {
-                // 方法2: 失敗時にpostMessageでfallback
                 if (reg.active) {
                     reg.active.postMessage({ type: 'SHOW_NOTIFICATION', title, body, tag });
                 }
@@ -185,7 +187,85 @@
     overlay.addEventListener("click", closeAllOverlays);
 
     /* ============================================================
-        4. 作業ログ記録
+        3.5 長時間放置 (Abandonment) 検知制御 (案A)
+    ============================================================ */
+    let isAbandonmentPromptOpen = false;
+    let bgStartTime = 0;
+    let bgStartLogSnapshot = null;
+    const ABANDON_THRESHOLD = 2 * 60 * 60 * 1000; // 2時間をミリ秒で定義 (7,200,000ms)
+
+    document.addEventListener("visibilitychange", () => {
+        if (document.hidden) {
+            bgStartTime = Date.now();
+            bgStartLogSnapshot = JSON.stringify(workLog); // バックグラウンド移行時点のログを保存
+        } else {
+            if (bgStartTime > 0) {
+                const bgDuration = Date.now() - bgStartTime;
+                // 2時間以上経過 ＆ タイマー稼働中の場合
+                if (bgDuration >= ABANDON_THRESHOLD) {
+                    if (swState.isRunning || pomoState.running) {
+                        isAbandonmentPromptOpen = true;
+                        clearInterval(timerId); // 計算が暴走する前に即座にタイマー停止
+                        openModal("abandonmentModal");
+                    }
+                }
+                bgStartTime = 0;
+            }
+        }
+    });
+
+    // 「記録せず戻す」ボタンの処理
+    document.getElementById("abandonDiscardBtn").addEventListener("click", () => {
+        if (bgStartLogSnapshot) {
+            workLog = JSON.parse(bgStartLogSnapshot); // ログをバックグラウンド移行時点に巻き戻す
+            saveJSON("f_work_log", workLog);
+        }
+        forceStopActiveTimers();
+        closeAllOverlays();
+        isAbandonmentPromptOpen = false;
+        showToast("放置された時間を破棄しました");
+    });
+
+    // 「上限(2時間)として記録」ボタンの処理
+    document.getElementById("abandonSaveBtn").addEventListener("click", () => {
+        if (bgStartLogSnapshot) {
+            workLog = JSON.parse(bgStartLogSnapshot);
+            // 現在のタグに2時間(7200秒)分を強制加算
+            const todayStr = getTodayDateString();
+            if (!workLog[todayStr]) workLog[todayStr] = { total: 0, tags: {} };
+            workLog[todayStr].total += 7200;
+            workLog[todayStr].tags[currentTagId] = (workLog[todayStr].tags[currentTagId] || 0) + 7200;
+            saveJSON("f_work_log", workLog);
+        }
+        forceStopActiveTimers();
+        closeAllOverlays();
+        isAbandonmentPromptOpen = false;
+        showToast("2時間分のログを記録して停止しました");
+    });
+
+    // 放置検知時の強制停止処理（見た目上も完全に停止させる）
+    function forceStopActiveTimers() {
+        if (swState.isRunning) {
+            swState.isRunning = false;
+            setIconState(document.getElementById("swPlayBtn"), false);
+            document.getElementById("sw-status-text").textContent = "一時停止中";
+            // 放置直前の時間にディスプレイを巻き戻す
+            swState.elapsedTime = bgStartTime - swState.startTime; 
+            const totalMs = swState.elapsedTime;
+            const hrs = Math.floor(totalMs / 3600000).toString().padStart(2, "0");
+            const mins = Math.floor((totalMs % 3600000) / 60000).toString().padStart(2, "0");
+            const secs = Math.floor((totalMs % 60000) / 1000).toString().padStart(2, "0");
+            document.getElementById("sw-time-text").textContent = `${hrs}:${mins}:${secs}`;
+            updateSwRingStyle();
+            clearSWNotification('timer-persistent');
+        }
+        if (pomoState.running) {
+            stopPomodoro(); // ポモドーロは標準の停止処理を呼ぶ
+        }
+    }
+
+    /* ============================================================
+        4. 作業ログ記録・修正機能
     ============================================================ */
     function logWorkSeconds(sec) {
         const todayStr = getTodayDateString();
@@ -202,6 +282,52 @@
             }
         }
     }
+
+    // ログ手動修正用のモーダルを開く
+    function openEditLogModal(dateString, tagId, currentMins) {
+        editingLogDate = dateString;
+        editingLogTagId = tagId;
+        const tag = getTag(tagId);
+        const [y, m, d] = dateString.split("-").map(Number);
+        
+        document.getElementById("editLogTargetText").textContent = `${y}年${m}月${d}日 ー #${tag ? tag.name : '不明'}`;
+        document.getElementById("editLogMinutes").value = currentMins;
+        openModal("editLogModal");
+    }
+
+    // 手動修正の適用処理
+    document.getElementById("saveEditLogBtn").addEventListener("click", () => {
+        const newMins = parseInt(document.getElementById("editLogMinutes").value, 10);
+        if (isNaN(newMins) || newMins < 0) {
+            showToast("正しい分数を入力してください");
+            return;
+        }
+
+        openConfirmModal("修正の確認", "入力した作業時間に修正しますか？", "修正する", false, () => {
+            if (workLog[editingLogDate] && workLog[editingLogDate].tags) {
+                const newSecs = newMins * 60;
+                workLog[editingLogDate].tags[editingLogTagId] = newSecs;
+
+                // その日の合計時間を再計算
+                let newTotal = 0;
+                for (const tId in workLog[editingLogDate].tags) {
+                    newTotal += workLog[editingLogDate].tags[tId];
+                }
+                workLog[editingLogDate].total = newTotal;
+
+                saveJSON("f_work_log", workLog);
+                
+                // UI再描画
+                renderCalendar(currentCalYear, currentCalMonth);
+                updateSelectedDayDetail(editingLogDate);
+                if (document.getElementById("chart-view-container").style.display !== "none") {
+                    renderChart(currentCalYear, currentCalMonth);
+                }
+                
+                showToast("作業時間を修正しました");
+            }
+        });
+    });
 
     /* ============================================================
         5. タグ管理
@@ -261,7 +387,7 @@
             return;
         }
         const tag = getTag(id);
-        openConfirmDeleteModal("タグの削除", `タグ「#${tag ? tag.name : ""}」を削除してもよろしいですか？（過去の記録は残ります）`, () => {
+        openConfirmModal("タグの削除", `タグ「#${tag ? tag.name : ""}」を削除してもよろしいですか？（過去の記録は残ります）`, "削除する", true, () => {
             appTags = appTags.filter(t => t.id !== id);
             saveJSON("f_tags", appTags);
             if (currentTagId === id) {
@@ -391,6 +517,8 @@
     }
 
     function tickPomodoro() {
+        if (isAbandonmentPromptOpen) return; // 放置検知中は何もしない
+
         const elapsed = Math.floor((Date.now() - pomoState.startTime) / 1000);
         let remaining = pomoState.duration - elapsed;
 
@@ -513,6 +641,8 @@
     }
 
     function tickStopwatch() {
+        if (isAbandonmentPromptOpen) return; // 放置検知中は何もしない
+
         swState.elapsedTime = Date.now() - swState.startTime;
         const elapsed = Math.floor(swState.elapsedTime / 1000);
         const diff = elapsed - swState.lastElapsedSeconds;
@@ -552,20 +682,26 @@
     }
 
     /* ============================================================
-        10. 削除確認モーダル(共通)
+        10. 汎用確認モーダル
     ============================================================ */
-    function openConfirmDeleteModal(title, message, onConfirm) {
-        document.getElementById("confirm-delete-title").textContent = title;
-        document.getElementById("confirm-delete-body").textContent = message;
-        const confirmBtn = document.getElementById("confirmDeleteBtn");
+    function openConfirmModal(title, message, confirmText, isDanger, onConfirm) {
+        document.getElementById("confirm-title").textContent = title;
+        document.getElementById("confirm-body").textContent = message;
+        
+        const btn = document.getElementById("confirmActionBtn");
+        btn.textContent = confirmText;
+        btn.className = `modal-btn confirm ${isDanger ? 'danger' : ''}`;
         
         const handler = () => { 
             onConfirm(); 
             closeAllOverlays(); 
-            confirmBtn.removeEventListener("click", handler); 
         };
-        confirmBtn.addEventListener("click", handler);
-        openModal("confirmDeleteModal");
+        // cloneNodeを使用して以前のイベントリスナーを安全に剥がす
+        const newBtn = btn.cloneNode(true);
+        btn.parentNode.replaceChild(newBtn, btn);
+        newBtn.addEventListener("click", handler);
+
+        openModal("confirmModal");
     }
 
     /* ============================================================
@@ -641,6 +777,7 @@
 
         const breakdownContainer = document.getElementById("calSelectedTagBreakdown");
         breakdownContainer.innerHTML = "";
+        
         if (logData && logData.tags) {
             const tagDict = {};
             appTags.forEach(t => tagDict[t.id] = t);
@@ -648,12 +785,18 @@
                 const tSec = logData.tags[tId];
                 if (tSec > 0 && tagDict[tId]) {
                     const mins = Math.round(tSec / 60);
-                    if (mins > 0) {
+                    if (mins >= 0) {
                         const badge = document.createElement("div");
                         badge.className = "tag-badge";
                         badge.style.backgroundColor = `${tagDict[tId].color}26`;
                         badge.style.color = tagDict[tId].color;
                         badge.innerHTML = `<span class="tag-badge-dot" style="background-color:${tagDict[tId].color};"></span>${escapeHtml(tagDict[tId].name)} ${mins}分`;
+                        
+                        // バッジタップ時の修正モーダル呼び出しを追加
+                        badge.addEventListener("click", () => {
+                            openEditLogModal(dateString, tId, mins);
+                        });
+
                         breakdownContainer.appendChild(badge);
                     }
                 }
@@ -759,8 +902,6 @@
         document.getElementById("toggle-chart").addEventListener("click", () => switchCalView("chart"));
         document.getElementById("prevMonthBtn").addEventListener("click", () => changeMonth(-1));
         document.getElementById("nextMonthBtn").addEventListener("click", () => changeMonth(1));
-
-        document.getElementById("cancelDeleteBtn").addEventListener("click", closeAllOverlays);
     }
 
     /* ============================================================
