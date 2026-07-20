@@ -1,4 +1,4 @@
-const CACHE_NAME = 'focus-timer-v1.2';
+const CACHE_NAME = 'focus-timer-v1.3';
 const ASSETS = [
   'index.html',
   'script.js',
@@ -44,7 +44,7 @@ self.addEventListener('fetch', (event) => {
 });
 
 /* ============================================================
-   通知の受信と制御イベント
+   通知の受信と制御イベント (バックグラウンド永続対応)
 ============================================================ */
 self.addEventListener('message', (event) => {
   if (!event.data) return;
@@ -57,18 +57,24 @@ self.addEventListener('message', (event) => {
       icon: 'https://placehold.co/192x192/171a26/74b9ff?text=FT',
       tag: event.data.tag || 'sw-persistent-notification',
       renotify: event.data.renotify || false,
-      silent: event.data.silent || false
+      silent: event.data.silent || false,
+      requireInteraction: true // 【追加】ユーザーがアクションするまで通知を消さない
     };
 
-    self.registration.showNotification(title, options);
+    // waitUntilで囲むことで、通知を出し終わる前にOSにタスクキルされるのを防ぐ
+    event.waitUntil(
+      self.registration.showNotification(title, options)
+    );
   }
 
   // 通知の消去命令
   if (event.data.type === 'CLEAR_NOTIFICATION') {
     const tag = event.data.tag || 'sw-persistent-notification';
-    self.registration.getNotifications({ tag }).then((notifications) => {
-      notifications.forEach((notification) => notification.close());
-    });
+    event.waitUntil(
+      self.registration.getNotifications({ tag }).then((notifications) => {
+        notifications.forEach((notification) => notification.close());
+      })
+    );
   }
 });
 

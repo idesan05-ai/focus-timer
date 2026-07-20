@@ -124,7 +124,7 @@
     }
 
     /* ============================================================
-        2.5 通知制御ヘルパー（Service Worker Ready 連携版）
+        2.5 通知制御ヘルパー（確実なService Worker委譲版）
     ============================================================ */
     function requestNotificationPermission() {
         if ("Notification" in window && Notification.permission === "default") {
@@ -136,13 +136,13 @@
         if ("Notification" in window && Notification.permission === "granted") {
             if ("serviceWorker" in navigator) {
                 navigator.serviceWorker.ready.then((registration) => {
-                    registration.showNotification(title, {
-                        body: body,
-                        icon: 'https://placehold.co/192x192/171a26/74b9ff?text=FT',
-                        tag: tag,
-                        renotify: true,
-                        silent: silent
-                    });
+                    // 確実にアクティブなService Workerを取得してメッセージを送る
+                    const sw = registration.active;
+                    if (sw) {
+                        sw.postMessage({
+                            type: 'SHOW_NOTIFICATION', title, body, tag, silent, renotify: true
+                        });
+                    }
                 });
             }
         }
@@ -152,9 +152,10 @@
         if ("Notification" in window && Notification.permission === "granted") {
             if ("serviceWorker" in navigator) {
                 navigator.serviceWorker.ready.then((registration) => {
-                    registration.getNotifications({ tag: tag }).then((notifications) => {
-                        notifications.forEach((notification) => notification.close());
-                    });
+                    const sw = registration.active;
+                    if (sw) {
+                        sw.postMessage({ type: 'CLEAR_NOTIFICATION', tag });
+                    }
                 });
             }
         }
