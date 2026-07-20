@@ -75,9 +75,7 @@
     }
     function getTodayDateString() { return formatDateKey(new Date()); }
 
-    function buildSeedWorkLog() {
-        return {};
-    }
+    function buildSeedWorkLog() { return {}; }
     let workLog = loadJSON("f_work_log", null) || buildSeedWorkLog();
     if (!loadJSON("f_work_log", null)) saveJSON("f_work_log", workLog);
 
@@ -124,40 +122,45 @@
     }
 
     /* ============================================================
-        2.5 通知制御ヘルパー（確実なService Worker委譲版）
+        2.5 通知制御ヘルパー（非同期許可要求 ＆ 二重バックアップ通知）
     ============================================================ */
-    function requestNotificationPermission() {
-        if ("Notification" in window && Notification.permission === "default") {
-            Notification.requestPermission();
+    async function ensureNotificationPermission() {
+        if (!("Notification" in window)) return false;
+        if (Notification.permission === "granted") return true;
+        if (Notification.permission !== "denied") {
+            const permission = await Notification.requestPermission();
+            return permission === "granted";
+        }
+        return false;
+    }
+
+    async function showSWNotification(title, body, tag) {
+        const permitted = await ensureNotificationPermission();
+        if (!permitted) return;
+
+        if ("serviceWorker" in navigator) {
+            const reg = await navigator.serviceWorker.ready;
+            // 方法1: Registrationから直接通知発行（最も確実）
+            reg.showNotification(title, {
+                body: body,
+                icon: 'https://placehold.co/192x192/171a26/74b9ff?text=FT',
+                tag: tag,
+                renotify: true,
+                requireInteraction: true
+            }).catch(() => {
+                // 方法2: 失敗時にpostMessageでfallback
+                if (reg.active) {
+                    reg.active.postMessage({ type: 'SHOW_NOTIFICATION', title, body, tag });
+                }
+            });
         }
     }
 
-    function showSWNotification(title, body, tag, silent = false) {
-        if ("Notification" in window && Notification.permission === "granted") {
-            if ("serviceWorker" in navigator) {
-                navigator.serviceWorker.ready.then((registration) => {
-                    // 確実にアクティブなService Workerを取得してメッセージを送る
-                    const sw = registration.active;
-                    if (sw) {
-                        sw.postMessage({
-                            type: 'SHOW_NOTIFICATION', title, body, tag, silent, renotify: true
-                        });
-                    }
-                });
-            }
-        }
-    }
-
-    function clearSWNotification(tag) {
-        if ("Notification" in window && Notification.permission === "granted") {
-            if ("serviceWorker" in navigator) {
-                navigator.serviceWorker.ready.then((registration) => {
-                    const sw = registration.active;
-                    if (sw) {
-                        sw.postMessage({ type: 'CLEAR_NOTIFICATION', tag });
-                    }
-                });
-            }
+    async function clearSWNotification(tag) {
+        if ("serviceWorker" in navigator && Notification.permission === "granted") {
+            const reg = await navigator.serviceWorker.ready;
+            const notifications = await reg.getNotifications({ tag: tag });
+            notifications.forEach(n => n.close());
         }
     }
 
@@ -367,9 +370,7 @@
             `作業${pomoSettings.workMin}分・休憩${pomoSettings.breakMin}分 × ${pomoSettings.loops}セット`;
     }
 
-    function startPomodoro() {
-        requestNotificationPermission();
-
+    async function startPomodoro() {
         pomoState.running = true;
         pomoState.currentLoop = 1;
         pomoState.isBreak = false;
@@ -386,7 +387,7 @@
         timerId = setInterval(tickPomodoro, 100);
 
         const tagName = getTag(currentTagId) ? getTag(currentTagId).name : "作業";
-        showSWNotification('?? 作業中: #' + tagName, 'ポモドーロタイマーが稼働しています。', 'timer-persistent', true);
+        await showSWNotification('?? 作業中: #' + tagName, 'ポモドーロタイマーが稼働しています。', 'timer-persistent');
     }
 
     function tickPomodoro() {
@@ -425,7 +426,7 @@
         transitionToNextPomoSection();
     }
 
-    function transitionToNextPomoSection() {
+    async function transitionToNextPomoSection() {
         pomoState.lastElapsedSeconds = 0;
         if (!pomoState.isBreak) {
             pomoState.isBreak = true;
@@ -434,8 +435,8 @@
             showToast("作業完了！休憩に入ります。");
             timerId = setInterval(tickPomodoro, 100);
             
-            showSWNotification("? 休憩時間です", "作業お疲れ様でした。リフレッシュしましょう！", 'timer-alert', false);
-            showSWNotification('? 休憩中', 'ポモドーロタイマーが稼働しています。', 'timer-persistent', true);
+            await showSWNotification("? 休憩時間です", "作業お疲れ様でした。リフレッシュしましょう！", 'timer-alert');
+            await showSWNotification('? 休憩中', 'ポモドーロタイマーが稼働しています。', 'timer-persistent');
         } else {
             if (pomoState.currentLoop < pomoSettings.loops) {
                 pomoState.currentLoop++;
@@ -445,13 +446,13 @@
                 showToast(`休憩終了！ループ ${pomoState.currentLoop} を開始します。`);
                 timerId = setInterval(tickPomodoro, 100);
 
-                showSWNotification("?? 作業時間です", "集中して作業に取り組みましょう！", 'timer-alert', false);
+                await showSWNotification("?? 作業時間です", "集中して作業に取り組みましょう！", 'timer-alert');
                 const tagName = getTag(currentTagId) ? getTag(currentTagId).name : "作業";
-                showSWNotification(`?? 作業中: #${tagName}`, 'ポモドーロタイマーが稼働しています。', 'timer-persistent', true);
+                await showSWNotification(`?? 作業中: #${tagName}`, 'ポモドーロタイマーが稼働しています。', 'timer-persistent');
             } else {
                 showToast("?? お疲れ様でした！ポモドーロ完了です。");
                 stopPomodoro();
-                showSWNotification("?? ポモドーロ完了！", "すべてのセッションが終了しました。お疲れ様でした！", 'timer-alert', false);
+                await showSWNotification("?? ポモドーロ完了！", "すべてのセッションが終了しました。お疲れ様でした！", 'timer-alert');
                 return;
             }
         }
@@ -487,11 +488,9 @@
             : `conic-gradient(var(--color-surface-2) 0%, var(--color-surface-2) 0%)`;
     }
 
-    function toggleStopwatch() {
+    async function toggleStopwatch() {
         const btn = document.getElementById("swPlayBtn");
         if (!swState.isRunning) {
-            requestNotificationPermission();
-            
             swState.isRunning = true;
             swState.startTime = Date.now() - swState.elapsedTime;
             swState.lastElapsedSeconds = Math.floor(swState.elapsedTime / 1000);
@@ -501,7 +500,7 @@
             document.getElementById("sw-status-text").textContent = "計測中...";
 
             const tagName = getTag(currentTagId) ? getTag(currentTagId).name : "作業";
-            showSWNotification(`?? 計測中: #${tagName}`, '現在ストップウォッチが稼働しています（タップで開く）', 'timer-persistent', true);
+            await showSWNotification(`?? 計測中: #${tagName}`, '現在ストップウォッチが稼働しています（タップで開く）', 'timer-persistent');
         } else {
             swState.isRunning = false;
             clearInterval(timerId);
@@ -526,7 +525,7 @@
         const totalMinutes = Math.floor(elapsed / 60);
         if (totalMinutes > 0 && totalMinutes % 30 === 0 && swState.lastReminderMinutes !== totalMinutes) {
             swState.lastReminderMinutes = totalMinutes;
-            showSWNotification('? 計測リマインド', `ストップウォッチ開始から ${totalMinutes} 分経過しました。継続中ですか？`, 'timer-reminder', false);
+            showSWNotification('? 計測リマインド', `ストップウォッチ開始から ${totalMinutes} 分経過しました。継続中ですか？`, 'timer-reminder');
         }
 
         const totalMs = swState.elapsedTime;
