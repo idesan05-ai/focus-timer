@@ -192,20 +192,19 @@
     let isAbandonmentPromptOpen = false;
     let bgStartTime = 0;
     let bgStartLogSnapshot = null;
-    const ABANDON_THRESHOLD = 2 * 60 * 60 * 1000; // 2時間をミリ秒で定義 (7,200,000ms)
+    const ABANDON_THRESHOLD = 2 * 60 * 60 * 1000; // 2時間をミリ秒で定義
 
     document.addEventListener("visibilitychange", () => {
         if (document.hidden) {
             bgStartTime = Date.now();
-            bgStartLogSnapshot = JSON.stringify(workLog); // バックグラウンド移行時点のログを保存
+            bgStartLogSnapshot = JSON.stringify(workLog); 
         } else {
             if (bgStartTime > 0) {
                 const bgDuration = Date.now() - bgStartTime;
-                // 2時間以上経過 ＆ タイマー稼働中の場合
                 if (bgDuration >= ABANDON_THRESHOLD) {
                     if (swState.isRunning || pomoState.running) {
                         isAbandonmentPromptOpen = true;
-                        clearInterval(timerId); // 計算が暴走する前に即座にタイマー停止
+                        clearInterval(timerId);
                         openModal("abandonmentModal");
                     }
                 }
@@ -214,10 +213,9 @@
         }
     });
 
-    // 「記録せず戻す」ボタンの処理
     document.getElementById("abandonDiscardBtn").addEventListener("click", () => {
         if (bgStartLogSnapshot) {
-            workLog = JSON.parse(bgStartLogSnapshot); // ログをバックグラウンド移行時点に巻き戻す
+            workLog = JSON.parse(bgStartLogSnapshot);
             saveJSON("f_work_log", workLog);
         }
         forceStopActiveTimers();
@@ -226,11 +224,9 @@
         showToast("放置された時間を破棄しました");
     });
 
-    // 「上限(2時間)として記録」ボタンの処理
     document.getElementById("abandonSaveBtn").addEventListener("click", () => {
         if (bgStartLogSnapshot) {
             workLog = JSON.parse(bgStartLogSnapshot);
-            // 現在のタグに2時間(7200秒)分を強制加算
             const todayStr = getTodayDateString();
             if (!workLog[todayStr]) workLog[todayStr] = { total: 0, tags: {} };
             workLog[todayStr].total += 7200;
@@ -243,13 +239,11 @@
         showToast("2時間分のログを記録して停止しました");
     });
 
-    // 放置検知時の強制停止処理（見た目上も完全に停止させる）
     function forceStopActiveTimers() {
         if (swState.isRunning) {
             swState.isRunning = false;
             setIconState(document.getElementById("swPlayBtn"), false);
             document.getElementById("sw-status-text").textContent = "一時停止中";
-            // 放置直前の時間にディスプレイを巻き戻す
             swState.elapsedTime = bgStartTime - swState.startTime; 
             const totalMs = swState.elapsedTime;
             const hrs = Math.floor(totalMs / 3600000).toString().padStart(2, "0");
@@ -260,8 +254,9 @@
             clearSWNotification('timer-persistent');
         }
         if (pomoState.running) {
-            stopPomodoro(); // ポモドーロは標準の停止処理を呼ぶ
+            stopPomodoro(); 
         }
+        updateTabState();
     }
 
     /* ============================================================
@@ -283,7 +278,6 @@
         }
     }
 
-    // ログ手動修正用のモーダルを開く
     function openEditLogModal(dateString, tagId, currentMins) {
         editingLogDate = dateString;
         editingLogTagId = tagId;
@@ -295,7 +289,6 @@
         openModal("editLogModal");
     }
 
-    // 手動修正の適用処理
     document.getElementById("saveEditLogBtn").addEventListener("click", () => {
         const newMins = parseInt(document.getElementById("editLogMinutes").value, 10);
         if (isNaN(newMins) || newMins < 0) {
@@ -308,7 +301,6 @@
                 const newSecs = newMins * 60;
                 workLog[editingLogDate].tags[editingLogTagId] = newSecs;
 
-                // その日の合計時間を再計算
                 let newTotal = 0;
                 for (const tId in workLog[editingLogDate].tags) {
                     newTotal += workLog[editingLogDate].tags[tId];
@@ -317,7 +309,6 @@
 
                 saveJSON("f_work_log", workLog);
                 
-                // UI再描画
                 renderCalendar(currentCalYear, currentCalMonth);
                 updateSelectedDayDetail(editingLogDate);
                 if (document.getElementById("chart-view-container").style.display !== "none") {
@@ -435,16 +426,27 @@
     }
 
     /* ============================================================
-        6. モード切替
+        6. モード切替とタブUIの制御
     ============================================================ */
+    // タイマー稼働状態に応じてタブの見た目を切り替える
+    function updateTabState() {
+        const isRunning = pomoState.running || swState.isRunning;
+        document.getElementById("tab-pomo").classList.toggle("disabled", isRunning);
+        document.getElementById("tab-sw").classList.toggle("disabled", isRunning);
+    }
+
     function updateSettingsBtnState() {
         document.getElementById("openSettingsBtn").classList.toggle("disabled", currentMode !== "pomodoro");
     }
 
     function switchMode(mode) {
         if (mode === currentMode) return;
-        if (currentMode === "pomodoro" && pomoState.running) stopPomodoro();
-        if (currentMode === "stopwatch" && swState.isRunning) toggleStopwatch();
+
+        // 稼働中の場合はモード切替をブロックし、トーストで通知する
+        if (pomoState.running || swState.isRunning) {
+            showToast("計測中はモードを切り替えられません");
+            return;
+        }
 
         currentMode = mode;
         document.getElementById("tab-pomo").classList.toggle("active", mode === "pomodoro");
@@ -506,7 +508,9 @@
 
         document.getElementById("pomoIdleControls").style.display = "none";
         document.getElementById("pomoRunControls").style.display = "flex";
+        
         updateSettingsBtnState();
+        updateTabState(); // タブ無効化
 
         updatePomoStatusText();
         clearInterval(timerId);
@@ -517,7 +521,7 @@
     }
 
     function tickPomodoro() {
-        if (isAbandonmentPromptOpen) return; // 放置検知中は何もしない
+        if (isAbandonmentPromptOpen) return; 
 
         const elapsed = Math.floor((Date.now() - pomoState.startTime) / 1000);
         let remaining = pomoState.duration - elapsed;
@@ -602,7 +606,10 @@
         updateIdlePomoDisplay();
         document.getElementById("pomoRunControls").style.display = "none";
         document.getElementById("pomoIdleControls").style.display = "flex";
+        
         updateSettingsBtnState();
+        updateTabState(); // タブ有効化
+        
         clearSWNotification('timer-persistent');
     }
 
@@ -637,11 +644,13 @@
             
             clearSWNotification('timer-persistent');
         }
+        
         updateSwRingStyle();
+        updateTabState(); // タブの有効/無効切り替え
     }
 
     function tickStopwatch() {
-        if (isAbandonmentPromptOpen) return; // 放置検知中は何もしない
+        if (isAbandonmentPromptOpen) return; 
 
         swState.elapsedTime = Date.now() - swState.startTime;
         const elapsed = Math.floor(swState.elapsedTime / 1000);
@@ -676,7 +685,9 @@
         document.getElementById("sw-time-text").textContent = "00:00:00";
         document.getElementById("sw-status-text").textContent = "タップして計測開始";
         setIconState(document.getElementById("swPlayBtn"), false);
+        
         updateSwRingStyle();
+        updateTabState(); // タブ有効化
         
         clearSWNotification('timer-persistent');
     }
@@ -696,7 +707,6 @@
             onConfirm(); 
             closeAllOverlays(); 
         };
-        // cloneNodeを使用して以前のイベントリスナーを安全に剥がす
         const newBtn = btn.cloneNode(true);
         btn.parentNode.replaceChild(newBtn, btn);
         newBtn.addEventListener("click", handler);
@@ -792,7 +802,6 @@
                         badge.style.color = tagDict[tId].color;
                         badge.innerHTML = `<span class="tag-badge-dot" style="background-color:${tagDict[tId].color};"></span>${escapeHtml(tagDict[tId].name)} ${mins}分`;
                         
-                        // バッジタップ時の修正モーダル呼び出しを追加
                         badge.addEventListener("click", () => {
                             openEditLogModal(dateString, tId, mins);
                         });
@@ -912,6 +921,7 @@
         fn_updateActiveTagDisplay();
         updateIdlePomoDisplay();
         updateSettingsBtnState();
+        updateTabState(); // 初期ロード時にも念のため反映
         renderCalendar(currentCalYear, currentCalMonth);
         updateSelectedDayDetail(selectedCalDateString);
         refreshIcons();
