@@ -50,7 +50,8 @@
     const timerRing = document.getElementById("timerRing");
 
     const pomoState = { running: false, currentLoop: 1, isBreak: false, duration: 0, startTime: 0, lastElapsedSeconds: 0 };
-    const swState = { isRunning: false, startTime: 0, elapsedTime: 0, lastElapsedSeconds: 0 };
+    // 通知リマインド用の管理変数(lastReminderMinutes)を追加
+    const swState = { isRunning: false, startTime: 0, elapsedTime: 0, lastElapsedSeconds: 0, lastReminderMinutes: 0 };
 
     let pomoSettings = loadJSON("f_pomo_settings", { loops: 2, workMin: 25, breakMin: 5 });
 
@@ -75,7 +76,7 @@
     }
     function getTodayDateString() { return formatDateKey(new Date()); }
 
-function buildSeedWorkLog() {
+    function buildSeedWorkLog() {
         return {};
     }
     let workLog = loadJSON("f_work_log", null) || buildSeedWorkLog();
@@ -104,10 +105,8 @@ function buildSeedWorkLog() {
         return res;
     }
 
-    // アイコンの生成（Lucideの初期化）
     function refreshIcons() { if (window.lucide) window.lucide.createIcons(); }
 
-    // トースト通知
     function showToast(message) {
         const toast = document.getElementById("toastEl");
         toast.textContent = message;
@@ -116,13 +115,39 @@ function buildSeedWorkLog() {
         showToast._t = setTimeout(() => toast.classList.remove("show"), 2600);
     }
 
-    // 再生・停止のアイコン表示切り替え
     function setIconState(btn, isPlaying) {
         const playIcon = btn.querySelector(".icon-play");
         const pauseIcon = btn.querySelector(".icon-pause");
         if (playIcon && pauseIcon) {
             playIcon.style.display = isPlaying ? "none" : "block";
             pauseIcon.style.display = isPlaying ? "block" : "none";
+        }
+    }
+
+    /* ============================================================
+        2.5 通知制御ヘルパー
+    ============================================================ */
+    function requestNotificationPermission() {
+        if ("Notification" in window && Notification.permission === "default") {
+            Notification.requestPermission();
+        }
+    }
+
+    function showSWNotification(title, body, tag, silent = false) {
+        if ("Notification" in window && Notification.permission === "granted") {
+            if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+                navigator.serviceWorker.controller.postMessage({
+                    type: 'SHOW_NOTIFICATION', title, body, tag, silent
+                });
+            }
+        }
+    }
+
+    function clearSWNotification(tag) {
+        if ("Notification" in window && Notification.permission === "granted") {
+            if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+                navigator.serviceWorker.controller.postMessage({ type: 'CLEAR_NOTIFICATION', tag });
+            }
         }
     }
 
@@ -333,6 +358,8 @@ function buildSeedWorkLog() {
     }
 
     function startPomodoro() {
+        requestNotificationPermission(); // 初回起動時に通知許可を要求
+
         pomoState.running = true;
         pomoState.currentLoop = 1;
         pomoState.isBreak = false;
@@ -347,6 +374,9 @@ function buildSeedWorkLog() {
         updatePomoStatusText();
         clearInterval(timerId);
         timerId = setInterval(tickPomodoro, 100);
+
+        const tagName = getTag(currentTagId) ? getTag(currentTagId).name : "作業";
+        showSWNotification('?? 作業中: #' + tagName, 'ポモドーロタイマーが稼働しています。', 'timer-persistent', true);
     }
 
     function tickPomodoro() {
@@ -393,6 +423,9 @@ function buildSeedWorkLog() {
             pomoState.startTime = Date.now();
             showToast("作業完了！休憩に入ります。");
             timerId = setInterval(tickPomodoro, 100);
+            
+            showSWNotification("? 休憩時間です", "作業お疲れ様でした。リフレッシュしましょう！", 'timer-alert', false);
+            showSWNotification('? 休憩中', 'ポモドーロタイマーが稼働しています。', 'timer-persistent', true);
         } else {
             if (pomoState.currentLoop < pomoSettings.loops) {
                 pomoState.currentLoop++;
@@ -401,9 +434,14 @@ function buildSeedWorkLog() {
                 pomoState.startTime = Date.now();
                 showToast(`休憩終了！ループ ${pomoState.currentLoop} を開始します。`);
                 timerId = setInterval(tickPomodoro, 100);
+
+                showSWNotification("?? 作業時間です", "集中して作業に取り組みましょう！", 'timer-alert', false);
+                const tagName = getTag(currentTagId) ? getTag(currentTagId).name : "作業";
+                showSWNotification(`?? 作業中: #${tagName}`, 'ポモドーロタイマーが稼働しています。', 'timer-persistent', true);
             } else {
-                showToast("🎉 お疲れ様でした！ポモドーロ完了です。");
+                showToast("?? お疲れ様でした！ポモドーロ完了です。");
                 stopPomodoro();
+                showSWNotification("?? ポモドーロ完了！", "すべてのセッションが終了しました。お疲れ様でした！", 'timer-alert', false);
                 return;
             }
         }
@@ -426,6 +464,7 @@ function buildSeedWorkLog() {
         document.getElementById("pomoRunControls").style.display = "none";
         document.getElementById("pomoIdleControls").style.display = "flex";
         updateSettingsBtnState();
+        clearSWNotification('timer-persistent'); // 計測停止時に通知を消去
     }
 
     /* ============================================================
@@ -441,6 +480,8 @@ function buildSeedWorkLog() {
     function toggleStopwatch() {
         const btn = document.getElementById("swPlayBtn");
         if (!swState.isRunning) {
+            requestNotificationPermission(); // 通知許可を要求
+            
             swState.isRunning = true;
             swState.startTime = Date.now() - swState.elapsedTime;
             swState.lastElapsedSeconds = Math.floor(swState.elapsedTime / 1000);
@@ -448,11 +489,18 @@ function buildSeedWorkLog() {
             timerId = setInterval(tickStopwatch, 50);
             setIconState(btn, true);
             document.getElementById("sw-status-text").textContent = "計測中...";
+
+            // 固定通知を発行
+            const tagName = getTag(currentTagId) ? getTag(currentTagId).name : "作業";
+            showSWNotification(`?? 計測中: #${tagName}`, '現在ストップウォッチが稼働しています（タップで開く）', 'timer-persistent', true);
         } else {
             swState.isRunning = false;
             clearInterval(timerId);
             setIconState(btn, false);
             document.getElementById("sw-status-text").textContent = "一時停止中";
+            
+            // 一時停止した場合は通知を消去する
+            clearSWNotification('timer-persistent');
         }
         updateSwRingStyle();
     }
@@ -461,10 +509,19 @@ function buildSeedWorkLog() {
         swState.elapsedTime = Date.now() - swState.startTime;
         const elapsed = Math.floor(swState.elapsedTime / 1000);
         const diff = elapsed - swState.lastElapsedSeconds;
+        
         if (diff > 0) {
             logWorkSeconds(diff);
             swState.lastElapsedSeconds = elapsed;
         }
+
+        // 30分経過するごとのリマインド通知
+        const totalMinutes = Math.floor(elapsed / 60);
+        if (totalMinutes > 0 && totalMinutes % 30 === 0 && swState.lastReminderMinutes !== totalMinutes) {
+            swState.lastReminderMinutes = totalMinutes; // 連続発火を防止
+            showSWNotification('? 計測リマインド', `ストップウォッチ開始から ${totalMinutes} 分経過しました。継続中ですか？`, 'timer-reminder', false);
+        }
+
         const totalMs = swState.elapsedTime;
         const hrs = Math.floor(totalMs / 3600000).toString().padStart(2, "0");
         const mins = Math.floor((totalMs % 3600000) / 60000).toString().padStart(2, "0");
@@ -478,10 +535,14 @@ function buildSeedWorkLog() {
         swState.isRunning = false;
         swState.elapsedTime = 0;
         swState.lastElapsedSeconds = 0;
+        swState.lastReminderMinutes = 0; // リマインド状態もリセット
+        
         document.getElementById("sw-time-text").textContent = "00:00:00";
         document.getElementById("sw-status-text").textContent = "タップして計測開始";
         setIconState(document.getElementById("swPlayBtn"), false);
         updateSwRingStyle();
+        
+        clearSWNotification('timer-persistent'); // リセット時に通知を消去
     }
 
     /* ============================================================
